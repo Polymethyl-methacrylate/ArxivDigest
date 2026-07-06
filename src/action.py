@@ -303,6 +303,13 @@ if __name__ == "__main__":
         mail = Mail(from_email, to_email, subject, content)
         mail_json = mail.get()
 
+        mail_json = {
+            "personalizations": [{"to": [{"email": "你的收件邮箱"}]}],
+            "from": {"email": "xenon.al.research@gmail.com"},
+            "subject": "Test",
+            "content": [{"type": "text/plain", "value": "Hello"}]
+        }
+
         # Send an HTTP POST request to /mail/send
         response = sg.client.mail.send.post(request_body=mail_json)
         if response.status_code >= 200 and response.status_code <= 300:
