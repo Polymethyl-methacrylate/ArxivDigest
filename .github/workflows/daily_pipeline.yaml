@@ -33,7 +33,7 @@ jobs:
         FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
         TO_EMAIL: ${{ secrets.TO_EMAIL }}
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: digest.html
         path: digest.html
@@ -47,7 +47,7 @@ jobs:
       if: "${{ env.SENDGRID_API_KEY == '' && (env.MAIL_CONNECTION || env.MAIL_USERNAME != '' && env.MAIL_PASSWORD != '') }}"
       run: echo "DEFINED=true" >> $GITHUB_OUTPUT 
     - name: Send mail
-      uses: dawidd6/action-send-mail@v3
+      uses: dawidd6/action-send-mail@v4
       env:
         DEFINED: ${{ steps.check.outputs.DEFINED }}
       if: ${{ env.DEFINED == 'true' }}
