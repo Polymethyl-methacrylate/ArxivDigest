@@ -303,15 +303,16 @@ if __name__ == "__main__":
         mail = Mail(from_email, to_email, subject, content)
         mail_json = mail.get()
 
-        # mail_json = {
-        #     "personalizations": [{"to": [{"email": "你的收件邮箱"}]}],
-        #     "from": {"email": "xenon.al.research@gmail.com"},
-        #     "subject": "Test",
-        #     "content": [{"type": "text/plain", "value": "Hello"}]
-        # }
-
         # Send an HTTP POST request to /mail/send
-        response = sg.client.mail.send.post(request_body=mail_json)
+        try:
+            response = sg.client.mail.send.post(request_body=mail_json)
+            print(response.status_code)
+        except Exception as e:
+            if hasattr(e, 'body'):
+                print(e.body)   # 这里会包含 API 返回的具体错误信息
+            raise
+
+        # response = sg.client.mail.send.post(request_body=mail_json)
         if response.status_code >= 200 and response.status_code <= 300:
             print("Send test email: Success!")
         else:
