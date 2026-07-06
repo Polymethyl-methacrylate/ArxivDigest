@@ -15,11 +15,58 @@ import copy
 
 StrOrOpenAIObject = Union[str, openai_object.OpenAIObject]
 
+DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo-16k"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_API_BASE = "https://api.deepseek.com"
+
 
 openai_org = os.getenv("OPENAI_ORG")
 if openai_org is not None:
     openai.organization = openai_org
     logging.warning(f"Switching to organization: {openai_org} for OAI API key.")
+
+
+def default_llm_provider():
+    provider = os.getenv("LLM_PROVIDER")
+    if provider:
+        return provider.lower()
+    if os.getenv("DEEPSEEK_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+        return "deepseek"
+    return "openai"
+
+
+def default_model_name(provider=None):
+    provider = (provider or default_llm_provider()).lower()
+    if os.getenv("LLM_MODEL"):
+        return os.getenv("LLM_MODEL")
+    if provider == "deepseek":
+        return os.getenv("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL)
+    return os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
+
+
+def configure_llm(provider=None, api_key=None, model_name=None):
+    provider = (provider or default_llm_provider()).lower()
+    if provider == "deepseek":
+        openai.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        openai.api_base = os.getenv("DEEPSEEK_API_BASE", DEEPSEEK_API_BASE)
+        if not openai.api_key:
+            raise RuntimeError("No DeepSeek API key found. Set DEEPSEEK_API_KEY.")
+    elif provider == "openai":
+        openai.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        openai.api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+        if not openai.api_key:
+            raise RuntimeError("No OpenAI API key found. Set OPENAI_API_KEY.")
+    else:
+        raise RuntimeError(f"Unsupported LLM provider {provider}")
+    return model_name or default_model_name(provider)
+
+
+def is_chat_model(model_name):
+    return model_name.startswith(("gpt-", "deepseek-"))
+
+
+def using_deepseek():
+    return "deepseek" in getattr(openai, "api_base", "").lower()
 
 
 @dataclasses.dataclass
@@ -69,7 +116,7 @@ def openai_completion(
             - an openai_object.OpenAIObject object (if return_text is False)
             - a list of objects of the above types (if decoding_args.n > 1)
     """
-    is_chat_model = "gpt-3.5" in model_name or "gpt-4" in model_name
+    chat_model = is_chat_model(model_name)
     is_single_prompt = isinstance(prompts, (str, dict))
     if is_single_prompt:
         prompts = [prompts]
@@ -105,7 +152,9 @@ def openai_completion(
                     **batch_decoding_args.__dict__,
                     **decoding_kwargs,
                 )
-                if is_chat_model:
+                if using_deepseek():
+                    shared_kwargs.pop("logit_bias", None)
+                if chat_model:
                     completion_batch = openai.ChatCompletion.create(
                         messages=[
                             {"role": "system", "content": "You are a helpful assistant."},
@@ -124,7 +173,13 @@ def openai_completion(
                 break
             except openai.error.OpenAIError as e:
                 logging.warning(f"OpenAIError: {e}.")
-                if "Please reduce your prompt" in str(e):
+                error_message = str(e).lower()
+                if isinstance(e, openai.error.RateLimitError) and (
+                    "quota" in error_message or "billing" in error_message
+                ):
+                    logging.error("OpenAI quota or billing limit hit; not retrying.")
+                    raise e
+                if "please reduce your prompt" in error_message:
                     batch_decoding_args.max_tokens = int(batch_decoding_args.max_tokens * 0.8)
                     logging.warning(f"Reducing target length to {batch_decoding_args.max_tokens}, Retrying...")
                 elif not backoff:

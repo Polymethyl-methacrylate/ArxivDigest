@@ -1,6 +1,11 @@
 # For physics topics, use the specific subtopics, e.g. "Astrophysics"
 topic: "Computer Science"
 
+# LLM provider for relevance scoring. Use "deepseek" with DEEPSEEK_API_KEY,
+# or "openai" with OPENAI_API_KEY.
+llm_provider: "deepseek"
+model_name: "deepseek-v4-flash"
+
 # Use the natural language names of the topics found on arXiv.
 categories:
   - "Artificial Intelligence"

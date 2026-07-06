@@ -28,7 +28,7 @@ Staying up to date on [arXiv](https://arxiv.org) papers can take a considerable 
 This repository offers a method to curate a daily digest, sorted by relevance, using large language models. These models are conditioned based on your personal research interests, which are described in natural language. 
 
 * You modify the configuration file `config.yaml` with an arXiv Subject, some set of Categories, and a natural language statement about the type of papers you are interested in.  
-* The code pulls all the abstracts for papers in those categories and ranks how relevant they are to your interest on a scale of 1-10 using `gpt-3.5-turbo-16k`.
+* The code pulls all the abstracts for papers in those categories and ranks how relevant they are to your interest on a scale of 1-10 using the LLM configured in `config.yaml`.
 * The code then emits an HTML digest listing all the relevant papers, and optionally emails it to you using [SendGrid](https://sendgrid.com). You will need to have a SendGrid account with an API key for this functionality to work.  
 
 ### Testing it out with Hugging Face:
@@ -68,8 +68,9 @@ The recommended way to get started using this repository is to:
 
 1. Fork the repository
 2. Modify `config.yaml` and merge the changes into your main branch.
-3. Set the following secrets [(under settings, Secrets and variables, repository secrets)](https://docs.github.com/en/actions/security-guides/encrypted-secrets#creating-encrypted-secrets-for-a-repository). See [Advanced Usage](./advanced_usage.md#create-and-fetch-your-api-keys) for more details on how to create and get OpenAi and SendGrid API keys:
-   - `OPENAI_API_KEY` From [OpenAI](https://platform.openai.com/account/api-keys)
+3. Set the following secrets [(under settings, Secrets and variables, repository secrets)](https://docs.github.com/en/actions/security-guides/encrypted-secrets#creating-encrypted-secrets-for-a-repository). See [Advanced Usage](./advanced_usage.md#create-and-fetch-your-api-keys) for more details on how to create and get LLM provider and SendGrid API keys:
+   - `DEEPSEEK_API_KEY` From [DeepSeek](https://platform.deepseek.com/api_keys), when `llm_provider: "deepseek"` in `config.yaml`.
+   - `OPENAI_API_KEY` From [OpenAI](https://platform.openai.com/account/api-keys), when `llm_provider: "openai"` in `config.yaml`.
    - `SENDGRID_API_KEY` From [SendGrid](https://app.SendGrid.com/settings/api_keys)
    - `FROM_EMAIL` This value must match the email you used to create the SendGrid API Key.
    - `TO_EMAIL`

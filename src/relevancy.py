@@ -35,21 +35,36 @@ def encode_prompt(query, prompt_papers):
     return prompt
 
 
+def _parse_score_line(line):
+    line = re.sub(r"^\d+\.\s*", "", line.strip())
+    if not line:
+        return None
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
+
+
 def post_process_chat_gpt_response(paper_data, response, threshold_score=8):
     selected_data = []
     if response is None:
-        return []
+        return [], False
     json_items = response['message']['content'].replace("\n\n", "\n").split("\n")
-    pattern = r"^\d+\. |\\"
-    import pprint
-    try:
-        score_items = [
-            json.loads(re.sub(pattern, "", line))
-            for line in json_items if "relevancy score" in line.lower()]
-    except Exception:
-        pprint.pprint([re.sub(pattern, "", line) for line in json_items if "relevancy score" in line.lower()])
-        raise RuntimeError("failed")
-    pprint.pprint(score_items)
+    score_items = []
+    for line in json_items:
+        if "relevancy score" not in line.lower():
+            continue
+        item = _parse_score_line(line)
+        if item is not None:
+            score_items.append(item)
+
+    hallucination = len(score_items) != len(paper_data)
+    if hallucination:
+        print(
+            f"Warning: expected {len(paper_data)} scores but parsed {len(score_items)} "
+            "(truncated or malformed lines were skipped)"
+        )
+
     scores = []
     for item in score_items:
         temp = item["Relevancy score"]
@@ -57,14 +72,8 @@ def post_process_chat_gpt_response(paper_data, response, threshold_score=8):
             scores.append(int(temp.split("/")[0]))
         else:
             scores.append(int(temp))
-    if len(score_items) != len(paper_data):
-        score_items = score_items[:len(paper_data)]
-        hallucination = True
-    else:
-        hallucination = False
 
     for idx, inst in enumerate(score_items):
-        # if the decoding stops due to length, the last example is likely truncated so we discard it
         if scores[idx] < threshold_score:
             continue
         output_str = "Title: " + paper_data[idx]["title"] + "\n"
@@ -83,20 +92,22 @@ def find_word_in_string(w, s):
 
 
 def process_subject_fields(subjects):
+    subjects = subjects.replace("Subjects:", "").strip()
     all_subjects = subjects.split(";")
-    all_subjects = [s.split(" (")[0] for s in all_subjects]
+    all_subjects = [s.split(" (")[0].strip() for s in all_subjects]
     return all_subjects
 
 def generate_relevance_score(
     all_papers,
     query,
-    model_name="gpt-3.5-turbo-16k",
+    model_name=None,
     threshold_score=8,
     num_paper_in_prompt=4,
     temperature=0.4,
     top_p=1.0,
     sorting=True
 ):
+    model_name = model_name or utils.default_model_name()
     ans_data = []
     request_idx = 1
     hallucination = False
@@ -108,7 +119,7 @@ def generate_relevance_score(
         decoding_args = utils.OpenAIDecodingArguments(
             temperature=temperature,
             n=1,
-            max_tokens=128*num_paper_in_prompt, # The response for each paper should be less than 128 tokens. 
+            max_tokens=256 * num_paper_in_prompt,
             top_p=top_p,
         )
         request_start = time.time()
@@ -139,7 +150,7 @@ def run_all_day_paper(
     query={"interest":"", "subjects":["Computation and Language", "Artificial Intelligence"]},
     date=None,
     data_dir="../data",
-    model_name="gpt-3.5-turbo-16k",
+    model_name=None,
     threshold_score=8,
     num_paper_in_prompt=8,
     temperature=0.4,

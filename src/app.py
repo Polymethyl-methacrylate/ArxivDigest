@@ -6,6 +6,7 @@ from sendgrid.helpers.mail import Mail, Email, To, Content
 import sendgrid
 import os
 import openai
+from html import escape
 
 topics = {
     "Physics": "",
@@ -34,6 +35,38 @@ physics_topics = {
     "Quantum Physics": "quant-ph"
 }
 
+
+def no_matching_papers_body(topic, categories, interest):
+    category_text = ", ".join(categories) if categories else "all categories"
+    interest_text = " after relevance filtering" if interest else ""
+    return (
+        f"No matching arXiv papers were found for {escape(topic)} "
+        f"({escape(category_text)}){interest_text} today."
+    )
+
+
+def openai_ranking_unavailable_body(papers):
+    body = (
+        "Warning: OpenAI relevance ranking was skipped because the OpenAI API "
+        "returned a rate limit or quota error. Showing unranked papers from the "
+        "selected categories instead.<br><br>"
+    )
+    paper_body = papers_body(papers)
+    if paper_body:
+        body += paper_body
+    else:
+        body += "No matching arXiv papers were found in the selected categories today."
+    return body
+
+
+def papers_body(papers):
+    return "<br><br>".join(
+        [
+            f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}'
+            for paper in papers
+        ]
+    )
+
 categories_map = {
     "Astrophysics": ["Astrophysics of Galaxies", "Cosmology and Nongalactic Astrophysics", "Earth and Planetary Astrophysics", "High Energy Astrophysical Phenomena", "Instrumentation and Methods for Astrophysics", "Solar and Stellar Astrophysics"],
     "Condensed Matter": ["Disordered Systems and Neural Networks", "Materials Science", "Mesoscale and Nanoscale Physics", "Other Condensed Matter", "Quantum Gases", "Soft Condensed Matter", "Statistical Mechanics", "Strongly Correlated Electrons", "Superconductivity"],
@@ -58,7 +91,7 @@ categories_map = {
 }
 
 
-def sample(email, topic, physics_topic, categories, interest):
+def sample(email, topic, physics_topic, categories, interest, provider, llm_token):
     if not topic:
         raise gr.Error("You must choose a topic.")
     if topic == "Physics":
@@ -76,12 +109,16 @@ def sample(email, topic, physics_topic, categories, interest):
     else:
         papers = get_papers(abbr, limit=4)
     if interest:
-        if not openai.api_key: raise gr.Error("Set your OpenAI api key on the left first")
+        try:
+            model_name = utils.configure_llm(provider=provider, api_key=llm_token or None)
+        except RuntimeError as e:
+            raise gr.Error(str(e))
         relevancy, _ = generate_relevance_score(
             papers,
             query={"interest": interest},
             threshold_score=0,
-            num_paper_in_prompt=4)
+            num_paper_in_prompt=4,
+            model_name=model_name)
         return "\n\n".join([paper["summarized_text"] for paper in relevancy])
     else:
         return "\n\n".join(f"Title: {paper['title']}\nAuthors: {paper['authors']}" for paper in papers)
@@ -104,7 +141,7 @@ def change_physics(subject):
         return gr.Dropdown.update(physics_topics, visible=True)
 
 
-def test(email, topic, physics_topic, categories, interest, key):
+def test(email, topic, physics_topic, categories, interest, key, provider, llm_token):
     if not email: raise gr.Error("Set your email")
     if not key: raise gr.Error("Set your SendGrid key")
     if topic == "Physics":
@@ -122,17 +159,27 @@ def test(email, topic, physics_topic, categories, interest, key):
     else:
         papers = get_papers(abbr, limit=4)
     if interest:
-        if not openai.api_key: raise gr.Error("Set your OpenAI api key on the left first")
-        relevancy, hallucination = generate_relevance_score(
-            papers,
-            query={"interest": interest},
-            threshold_score=7,
-            num_paper_in_prompt=8)
-        body = "<br><br>".join([f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}<br>Score: {paper["Relevancy score"]}<br>Reason: {paper["Reasons for match"]}' for paper in relevancy])
+        try:
+            model_name = utils.configure_llm(provider=provider, api_key=llm_token or None)
+        except RuntimeError as e:
+            raise gr.Error(str(e))
+        hallucination = False
+        try:
+            relevancy, hallucination = generate_relevance_score(
+                papers,
+                query={"interest": interest},
+                threshold_score=7,
+                num_paper_in_prompt=8,
+                model_name=model_name)
+            body = "<br><br>".join([f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}<br>Score: {paper["Relevancy score"]}<br>Reason: {paper["Reasons for match"]}' for paper in relevancy])
+        except openai.error.RateLimitError:
+            body = openai_ranking_unavailable_body(papers)
         if hallucination:
             body = "Warning: the model hallucinated some papers. We have tried to remove them, but the scores may not be accurate.<br><br>" + body
     else:
-        body = "<br><br>".join([f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}' for paper in papers])
+        body = papers_body(papers)
+    if not body.strip():
+        body = no_matching_papers_body(topic, categories, interest)
     sg = sendgrid.SendGridAPIClient(api_key=key)
     from_email = Email(email)
     to_email = To(email)
@@ -149,13 +196,15 @@ def test(email, topic, physics_topic, categories, interest, key):
         return "Failure: ({response.status_code})"
 
 
-def register_openai_token(token):
-    openai.api_key = token
+def register_llm_token(token, provider):
+    if token:
+        utils.configure_llm(provider=provider, api_key=token)
 
 with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=1):
-            token = gr.Textbox(label="OpenAI API Key", type="password")
+            provider = gr.Radio(["deepseek", "openai"], value="deepseek", label="LLM Provider")
+            token = gr.Textbox(label="OpenAI / DeepSeek API Key", type="password")
             subject = gr.Radio(
                 list(topics.keys()), label="Topic"
             )
@@ -184,12 +233,13 @@ with gr.Blocks() as demo:
                 with gr.Row():
                     test_btn = gr.Button("Send email")
                     output = gr.Textbox(show_label=False, placeholder="email status")
-    test_btn.click(fn=test, inputs=[email, subject, physics_subject, subsubject, interest, sendgrid_token], outputs=output)
-    token.change(fn=register_openai_token, inputs=[token])
-    sample_btn.click(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest], outputs=sample_output)
-    subject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest], outputs=sample_output)
-    physics_subject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest], outputs=sample_output)
-    subsubject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest], outputs=sample_output)
-    interest.submit(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest], outputs=sample_output)
+    test_btn.click(fn=test, inputs=[email, subject, physics_subject, subsubject, interest, sendgrid_token, provider, token], outputs=output)
+    token.change(fn=register_llm_token, inputs=[token, provider])
+    provider.change(fn=register_llm_token, inputs=[token, provider])
+    sample_btn.click(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest, provider, token], outputs=sample_output)
+    subject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest, provider, token], outputs=sample_output)
+    physics_subject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest, provider, token], outputs=sample_output)
+    subsubject.change(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest, provider, token], outputs=sample_output)
+    interest.submit(fn=sample, inputs=[email, subject, physics_subject, subsubject, interest, provider, token], outputs=sample_output)
 
 demo.launch(show_api=False)

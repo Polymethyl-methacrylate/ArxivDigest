@@ -33,7 +33,7 @@ def _download_new_papers(field_abbr):
         paper['title'] = dd_list[i].find("div", {"class": "list-title mathjax"}).text.replace("Title: ", "").strip()
         paper['authors'] = dd_list[i].find("div", {"class": "list-authors"}).text \
                             .replace("Authors:\n", "").replace("\n", "").strip()
-        paper['subjects'] = dd_list[i].find("div", {"class": "list-subjects"}).text.replace("Subjects: ", "").strip()
+        paper['subjects'] = dd_list[i].find("div", {"class": "list-subjects"}).text.replace("Subjects:", "").strip()
         paper['abstract'] = dd_list[i].find("p", {"class": "mathjax"}).text.replace("\n", " ").strip()
         new_paper_list.append(paper)
 

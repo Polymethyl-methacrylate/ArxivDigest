@@ -2,6 +2,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 
 from datetime import date
+from html import escape
 
 import argparse
 import yaml
@@ -10,6 +11,7 @@ from dotenv import load_dotenv
 import openai
 from relevancy import generate_relevance_score, process_subject_fields
 from download_new_papers import get_papers
+from utils import configure_llm
 
 
 # Hackathon quality code. Don't judge too harshly.
@@ -221,7 +223,39 @@ category_map = {
 }
 
 
-def generate_body(topic, categories, interest, threshold):
+def no_matching_papers_body(topic, categories, interest):
+    category_text = ", ".join(categories) if categories else "all categories"
+    interest_text = " after relevance filtering" if interest else ""
+    return (
+        f"No matching arXiv papers were found for {escape(topic)} "
+        f"({escape(category_text)}){interest_text} today."
+    )
+
+
+def openai_ranking_unavailable_body(papers):
+    body = (
+        "Warning: OpenAI relevance ranking was skipped because the OpenAI API "
+        "returned a rate limit or quota error. Showing unranked papers from the "
+        "selected categories instead.<br><br>"
+    )
+    paper_body = papers_body(papers)
+    if paper_body:
+        body += paper_body
+    else:
+        body += "No matching arXiv papers were found in the selected categories today."
+    return body
+
+
+def papers_body(papers):
+    return "<br><br>".join(
+        [
+            f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}'
+            for paper in papers
+        ]
+    )
+
+
+def generate_body(topic, categories, interest, threshold, model_name=None):
     if topic == "Physics":
         raise RuntimeError("You must choose a physics subtopic.")
     elif topic in physics_topics:
@@ -243,12 +277,16 @@ def generate_body(topic, categories, interest, threshold):
     else:
         papers = get_papers(abbr)
     if interest:
-        relevancy, hallucination = generate_relevance_score(
-            papers,
-            query={"interest": interest},
-            threshold_score=threshold,
-            num_paper_in_prompt=16,
-        )
+        try:
+            relevancy, hallucination = generate_relevance_score(
+                papers,
+                query={"interest": interest},
+                threshold_score=threshold,
+                num_paper_in_prompt=8,
+                model_name=model_name,
+            )
+        except openai.error.RateLimitError:
+            return openai_ranking_unavailable_body(papers)
         body = "<br><br>".join(
             [
                 f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}<br>Score: {paper["Relevancy score"]}<br>Reason: {paper["Reasons for match"]}'
@@ -261,12 +299,9 @@ def generate_body(topic, categories, interest, threshold):
                 + body
             )
     else:
-        body = "<br><br>".join(
-            [
-                f'Title: <a href="{paper["main_page"]}">{paper["title"]}</a><br>Authors: {paper["authors"]}'
-                for paper in papers
-            ]
-        )
+        body = papers_body(papers)
+    if not body.strip():
+        body = no_matching_papers_body(topic, categories, interest)
     return body
 
 
@@ -281,17 +316,21 @@ if __name__ == "__main__":
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    if "OPENAI_API_KEY" not in os.environ:
-        raise RuntimeError("No openai api key found")
-    openai.api_key = os.environ.get("OPENAI_API_KEY")
-
     topic = config["topic"]
     categories = config["categories"]
     from_email = os.environ.get("FROM_EMAIL")
     to_email = os.environ.get("TO_EMAIL")
     threshold = config["threshold"]
     interest = config["interest"]
-    body = generate_body(topic, categories, interest, threshold)
+    model_name = None
+    if interest:
+        model_name = configure_llm(
+            provider=config.get("llm_provider"),
+            model_name=config.get("model_name"),
+        )
+    body = generate_body(topic, categories, interest, threshold, model_name=model_name)
+    if not body.strip():
+        body = "<p>No relevant papers found for today's digest.</p>"
     with open("digest.html", "w") as f:
         f.write(body)
     if os.environ.get("SENDGRID_API_KEY", None):
