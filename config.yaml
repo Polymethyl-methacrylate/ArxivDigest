@@ -1,9 +1,13 @@
 # For physics topics, use the specific subtopics, e.g. "Astrophysics"
 topic: "Computer Science"
-# An empty list here will include all categories in a topic
-# Use the natural language names of the topics, found here: https://arxiv.org
-# Including more categories will result in more calls to the large language model
-categories: ["Artificial Intelligence", "Computation and Language"]
+
+# Use the natural language names of the topics found on arXiv.
+categories:
+  - "Artificial Intelligence"
+  - "Machine Learning"
+  - "Robotics"
+  - "Computer Vision and Pattern Recognition"
+  - "Computation and Language"
 
 # Relevance score threshold. abstracts that receive a score less than this from the large language model
 # will have their papers filtered out.
@@ -21,7 +25,19 @@ threshold: 7
 # This can be empty, which just return a full list of papers with no judgement or filtering,
 # in whatever order arXiv responds with.
 interest: |
-  1. Large language model pretraining and finetunings
-  2. Multimodal machine learning
-  3. Do not care about specific application, for example, information extraction, summarization, etc.
-  4. Not interested in paper focus on specific languages, e.g., Arabic, Chinese, etc.
+  1.I am interested in robot learning and embodied AI, especially reinforcement
+  learning for robotics, sim-to-real transfer, humanoid and legged locomotion,
+  terrain-adaptive and vision-based locomotion, whole-body control, motion
+  tracking, motion imitation, motion retargeting, and loco-manipulation.
+
+  2.I am also interested in general-purpose robot controllers, robot foundation
+  models, large-scale robot data, imitation learning, offline RL, diffusion
+  policies, and multimodal robot learning, including vision-language-action
+  and whole-body VLA models.
+
+  3.Prioritize papers with relevance to real-world robot deployment, robustness,
+  contact-rich control, and learning-based control for humanoids or quadrupeds.
+
+  4.Do not prioritize language-specific NLP, text-only applications such as
+  information extraction or summarization, or purely theoretical RL without
+  clear relevance to robotics or embodied agents.
